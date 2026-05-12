@@ -260,6 +260,24 @@ Account number: 03-1395-0108028-003</textarea></div>
       <div class="field"><label>Client Address (optional)</label><textarea id="client-address" placeholder="456 Client Road&#10;City"></textarea></div>
       <div class="field"><label>This Client's Hourly Rate (NZD)<br><small style="font-weight:300;font-size:.75rem;">Leave blank to use default above</small></label><input type="number" id="client-rate" placeholder="Use default" min="0" step="0.50"></div>
     </div>
+    <div class="field-row three">
+      <div class="field">
+        <label>Discount Type</label>
+        <select id="discount-type" onchange="toggleDiscountInput()">
+          <option value="none">No discount</option>
+          <option value="pct">Percentage (% off total)</option>
+          <option value="flat">Fixed amount ($ off per session)</option>
+        </select>
+      </div>
+      <div class="field" id="discount-value-wrap">
+        <label id="discount-value-label">Discount Amount</label>
+        <input type="number" id="client-discount" placeholder="e.g. 10" min="0" step="0.50">
+      </div>
+      <div class="field">
+        <label>Discount Label<br><small style="font-weight:300;font-size:.75rem;">Shown on invoice</small></label>
+        <input type="text" id="discount-label" placeholder="Multi-lesson discount">
+      </div>
+    </div>
   </div>
 
   <!-- Step 3: Calendar -->
@@ -380,6 +398,7 @@ Account number: 03-1395-0108028-003</textarea></div>
         <div class="totals-box">
           <div class="totals-row"><label>Total Hours</label><span id="d-total-hours">0h 0m</span></div>
           <div class="totals-row"><label>Sessions</label><span id="d-total-sessions">0</span></div>
+          <div class="totals-row" id="d-discount-row" style="display:none;"><label id="d-discount-label">Discount</label><span id="d-discount-amount" style="color:#2e7d32;">-NZD $0.00</span></div>
           <div class="totals-row"><label>TOTAL DUE</label><span id="d-total-amount">NZD $0.00</span></div>
         </div>
       </div>
@@ -394,7 +413,10 @@ Account number: 03-1395-0108028-003</textarea></div>
 
 <!-- ══ HISTORY SCREEN ══ -->
 <div id="history-screen" class="screen">
-  <h2>Invoice History</h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;">
+    <h2>Invoice History</h2>
+    <button onclick="clearAllHistory()" style="font-family:'DM Mono',monospace;font-size:.68rem;padding:.35rem .8rem;border-radius:4px;border:1px solid #e57373;background:white;color:#c62828;cursor:pointer;">🗑 Clear All</button>
+  </div>
   <p class="subtitle">All saved invoices. Click a status to update it.</p>
   <div class="earnings-bar" id="earnings-bar"></div>
   <table class="history-table" id="history-table">
@@ -421,7 +443,18 @@ let parsedEvents = [];
 let sessions = [];
 let hourlyRate = 0;
 let clients = JSON.parse(localStorage.getItem('csl_clients') || '[]');
-let invoiceHistory = JSON.parse(localStorage.getItem('csl_history') || '[]');
+let invoiceHistory = (() => {
+  try {
+    const raw = localStorage.getItem('csl_history');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Only filter out truly corrupted entries (missing both id and client)
+    return parsed.filter(h => h && (h.id || h.client));
+  } catch(e) {
+    return [];
+  }
+})();
 let currentInvoiceData = null;
 
 // ── INIT ──
@@ -452,6 +485,20 @@ function showScreen(name) {
 }
 
 // ── CLIENT PROFILES ──
+function toggleDiscountInput() {
+  const type = document.getElementById('discount-type').value;
+  const wrap = document.getElementById('discount-value-wrap');
+  const lbl  = document.getElementById('discount-value-label');
+  if (type === 'none') {
+    wrap.style.opacity = '0.4';
+    wrap.style.pointerEvents = 'none';
+  } else {
+    wrap.style.opacity = '1';
+    wrap.style.pointerEvents = 'auto';
+    lbl.textContent = type === 'pct' ? 'Discount (%)' : 'Discount ($ per session)';
+  }
+}
+
 function renderClientChips() {
   const list = document.getElementById('client-chip-list');
   const msg = document.getElementById('no-clients-msg');
@@ -472,7 +519,10 @@ function saveClient() {
     name,
     email: document.getElementById('client-email').value,
     address: document.getElementById('client-address').value,
-    rate: document.getElementById('client-rate').value
+    rate: document.getElementById('client-rate').value,
+    discountType: document.getElementById('discount-type').value,
+    discount: document.getElementById('client-discount').value,
+    discountLabel: document.getElementById('discount-label').value
   };
   const existing = clients.findIndex(c => c.name === name);
   if (existing >= 0) clients[existing] = client; else clients.push(client);
@@ -486,6 +536,10 @@ function loadClient(i) {
   document.getElementById('client-email').value = c.email || '';
   document.getElementById('client-address').value = c.address || '';
   document.getElementById('client-rate').value = c.rate || '';
+  document.getElementById('discount-type').value = c.discountType || 'none';
+  document.getElementById('client-discount').value = c.discount || '';
+  document.getElementById('discount-label').value = c.discountLabel || '';
+  toggleDiscountInput();
 }
 
 function deleteClient(i) {
@@ -615,11 +669,17 @@ function generateInvoice() {
 
   // Store invoice metadata for saving
   const monthName = new Date(year, month, 1).toLocaleDateString('en-NZ', {month:'long', year:'numeric'});
+  const discountType  = document.getElementById('discount-type').value;
+  const discountVal   = parseFloat(document.getElementById('client-discount').value) || 0;
+  const discountLabel = document.getElementById('discount-label').value || 'Multi-lesson discount';
   currentInvoiceData = {
     id: document.getElementById('inv-number').value || 'INV-???',
     client: document.getElementById('client-name').value || 'Client',
     period: monthName,
-    status: 'draft'
+    status: 'draft',
+    discountType,
+    discountVal,
+    discountLabel
   };
 
   document.getElementById('inv-status-select').value = 'draft';
@@ -697,15 +757,44 @@ function recalcTotals() {
     totalMins += dur.totalMins;
   });
   updateTotals(totalMins, (totalMins/60)*hourlyRate);
+  // Note: currentInvoiceData.amount is set inside updateTotals() after discount is applied
   document.getElementById('inv-session-count').textContent =
     sessions.length+' session'+(sessions.length!==1?'s':'')+' · '+Math.floor(totalMins/60)+'h '+(totalMins%60)+'m total';
-  if (currentInvoiceData) currentInvoiceData.amount = (totalMins/60)*hourlyRate;
 }
 
 function updateTotals(totalMins, totalAmount) {
-  document.getElementById('d-total-hours').textContent   = Math.floor(totalMins/60)+'h '+(totalMins%60)+'m';
+  document.getElementById('d-total-hours').textContent    = Math.floor(totalMins/60)+'h '+(totalMins%60)+'m';
   document.getElementById('d-total-sessions').textContent = sessions.length;
-  document.getElementById('d-total-amount').textContent  = 'NZD $'+totalAmount.toFixed(2);
+
+  const discountType  = currentInvoiceData?.discountType || 'none';
+  const discountVal   = currentInvoiceData?.discountVal || 0;
+  const discountLabel = currentInvoiceData?.discountLabel || 'Multi-lesson discount';
+  const discountRow   = document.getElementById('d-discount-row');
+
+  let discountAmt = 0;
+  let labelText = discountLabel;
+
+  if (discountType === 'pct' && discountVal > 0) {
+    discountAmt = totalAmount * (discountVal / 100);
+    labelText = discountLabel + ' (' + discountVal + '%)';
+  } else if (discountType === 'flat' && discountVal > 0) {
+    discountAmt = discountVal * sessions.length;
+    labelText = discountLabel + ' ($' + discountVal.toFixed(2) + ' x ' + sessions.length + ' sessions)';
+  }
+
+  const finalAmount = totalAmount - discountAmt;
+
+  if (discountAmt > 0) {
+    discountRow.style.display = 'flex';
+    document.getElementById('d-discount-label').textContent  = labelText;
+    document.getElementById('d-discount-amount').textContent = '-NZD $' + discountAmt.toFixed(2);
+    if (currentInvoiceData) currentInvoiceData.amount = finalAmount;
+  } else {
+    discountRow.style.display = 'none';
+    if (currentInvoiceData) currentInvoiceData.amount = totalAmount;
+  }
+
+  document.getElementById('d-total-amount').textContent = 'NZD $' + finalAmount.toFixed(2);
 }
 
 function fmtDate(d) { return d.toLocaleDateString('en-NZ',{weekday:'short',day:'numeric',month:'short',year:'numeric'}); }
@@ -737,15 +826,31 @@ function updateStatusStyle() {
 // ── SAVE TO HISTORY ──
 function saveToHistory() {
   if (!currentInvoiceData) return;
-  currentInvoiceData.status = document.getElementById('inv-status-select').value;
-  currentInvoiceData.savedAt = new Date().toISOString();
-  const idx = invoiceHistory.findIndex(h => h.id === currentInvoiceData.id);
-  if (idx >= 0) invoiceHistory[idx] = {...currentInvoiceData};
-  else invoiceHistory.unshift({...currentInvoiceData});
-  localStorage.setItem('csl_history', JSON.stringify(invoiceHistory));
+
+  // Only store lightweight summary — never sessions or large data
+  const record = {
+    id:      currentInvoiceData.id,
+    client:  currentInvoiceData.client,
+    period:  currentInvoiceData.period,
+    amount:  currentInvoiceData.amount || 0,
+    status:  document.getElementById('inv-status-select').value,
+    savedAt: new Date().toISOString()
+  };
+
+  const idx = invoiceHistory.findIndex(h => h.id === record.id);
+  if (idx >= 0) invoiceHistory[idx] = record;
+  else invoiceHistory.unshift(record);
+
+  // Keep up to 100 invoices
+  if (invoiceHistory.length > 100) invoiceHistory = invoiceHistory.slice(0, 100);
+
+  const saved = safeStoreHistory();
+  if (!saved) alert('Could not save — browser storage is full. Please use "Clear All" in Invoice History to free up space.');
+
   const btn = event.target;
   btn.textContent = '✓ Saved!';
   setTimeout(() => btn.textContent = '💾 Save', 2000);
+  renderHistory();
 }
 
 // ── HISTORY SCREEN ──
@@ -792,15 +897,44 @@ function renderHistory() {
 function updateHistStatus(i, sel) {
   invoiceHistory[i].status = sel.value;
   sel.className = 'hist-status ' + sel.value;
-  localStorage.setItem('csl_history', JSON.stringify(invoiceHistory));
+  safeStoreHistory();
   renderHistory();
 }
 
 function deleteHistory(i) {
   if (!confirm('Delete invoice ' + invoiceHistory[i].id + '?')) return;
   invoiceHistory.splice(i, 1);
-  localStorage.setItem('csl_history', JSON.stringify(invoiceHistory));
+  safeStoreHistory();
   renderHistory();
+}
+
+function clearAllHistory() {
+  if (!confirm('Clear ALL saved invoices? This cannot be undone.')) return;
+  invoiceHistory = [];
+  localStorage.removeItem('csl_history');
+  renderHistory();
+}
+
+function safeStoreHistory() {
+  // Try storing; if quota exceeded, remove old entries one by one
+  for (let attempts = 0; attempts < 10; attempts++) {
+    try {
+      localStorage.setItem('csl_history', JSON.stringify(invoiceHistory));
+      return true;
+    } catch(e) {
+      if (invoiceHistory.length > 1) {
+        invoiceHistory.pop(); // remove oldest
+      } else {
+        // Can't store even one — clear everything and retry
+        localStorage.clear();
+        try {
+          localStorage.setItem('csl_history', JSON.stringify(invoiceHistory));
+          return true;
+        } catch(e2) { return false; }
+      }
+    }
+  }
+  return false;
 }
 
 // ── GOOGLE CALENDAR OAUTH CONNECTION ──
