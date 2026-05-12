@@ -837,7 +837,9 @@ function saveToHistory() {
     savedAt: new Date().toISOString()
   };
 
-  const idx = invoiceHistory.findIndex(h => h.id === record.id);
+  // Use invoice number + client as the unique key to avoid overwriting different clients' invoices
+  const uniqueKey = record.id + '|' + record.client;
+  const idx = invoiceHistory.findIndex(h => (h.id + '|' + h.client) === uniqueKey);
   if (idx >= 0) invoiceHistory[idx] = record;
   else invoiceHistory.unshift(record);
 
