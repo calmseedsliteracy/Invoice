@@ -1181,102 +1181,57 @@ let editSessions = []; // working copy of sessions being edited
 function editHistory(i) {
   const h = invoiceHistory[i];
   if (!h) return;
-  document.getElementById('edit-modal-idx').value = i;
-  document.getElementById('edit-inv-id').value  = h.id || '';
-  document.getElementById('edit-client').value  = h.client || '';
-  document.getElementById('edit-period').value  = h.period || '';
-  document.getElementById('edit-rate').value    = h.hourlyRate || hourlyRate || 0;
 
-  // Load sessions from saved record, or create a single placeholder
-  editSessions = (h.sessions || []).map(s => ({
+  // Load sessions
+  sessions = (h.sessions || []).map(s => ({
     title:      s.title || 'Literacy Session',
     start:      s.start ? new Date(s.start) : new Date(),
     end:        s.end   ? new Date(s.end)   : new Date(Date.now() + 3600000),
     customMins: s.customMins || null
   }));
 
-  if (editSessions.length === 0) {
-    editSessions.push({ title: 'Literacy Session', start: new Date(), end: new Date(Date.now()+3600000), customMins: null });
+  if (sessions.length === 0) {
+    sessions.push({ title: 'Literacy Session', start: new Date(), end: new Date(Date.now()+3600000), customMins: null });
   }
 
-  renderEditSessions();
-  recalcEditTotal();
-  document.getElementById('edit-modal').style.display = 'flex';
+  // Restore rates and discount
+  hourlyRate = h.hourlyRate || hourlyRate || 0;
+
+  // Restore currentInvoiceData
+  currentInvoiceData = {
+    id:           h.id,
+    client:       h.client,
+    period:       h.period,
+    status:       h.status || 'draft',
+    discountType:  h.discountType  || 'none',
+    discountVal:   h.discountVal   || 0,
+    discountLabel: h.discountLabel || '',
+    amount:        h.amount || 0
+  };
+
+  // Populate the setup form fields
+  document.getElementById('inv-number').value     = h.id || '';
+  document.getElementById('client-name').value    = h.client || '';
+  document.getElementById('hourly-rate').value    = h.hourlyRate || '';
+  document.getElementById('discount-type').value  = h.discountType || 'none';
+  document.getElementById('client-discount').value = h.discountVal || '';
+  document.getElementById('discount-label').value  = h.discountLabel || '';
+  toggleDiscountInput();
+
+  // Set invoice status
+  document.getElementById('inv-status-select').value = h.status || 'draft';
+  updateStatusStyle();
+
+  // Render the invoice
+  renderInvoiceDoc();
+
+  // Switch to invoice screen
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('invoice-screen').classList.add('active');
 }
 
-function renderEditSessions() {
-  const list = document.getElementById('edit-sessions-list');
-  const durOpts = [30,45,50,60,75,90,120];
-  list.innerHTML = editSessions.map((s, i) => {
-    const mins = s.customMins || Math.round(((s.end - s.start)/60000)/15)*15 || 60;
-    const opts = durOpts.map(m => {
-      const h2 = Math.floor(m/60), r = m%60;
-      const lbl = h2 > 0 ? (r > 0 ? h2+'h '+r+'m' : h2+'h') : r+'m';
-      return '<option value="'+m+'"'+(mins===m?' selected':'')+'>'+lbl+'</option>';
-    }).join('');
-    const d = s.start ? s.start.toLocaleDateString('en-NZ',{day:'numeric',month:'short'}) : '—';
-    return '<div style="display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;border-bottom:1px solid var(--rule);">' +
-      '<span style="font-family:monospace;font-size:.72rem;color:var(--grey-mid);min-width:55px;">'+d+'</span>' +
-      '<input value="'+s.title+'" oninput="editSessions['+i+'].title=this.value" style="flex:1;border:none;border-bottom:1px solid var(--rule);font-size:.85rem;padding:.2rem .3rem;outline:none;">' +
-      '<select onchange="setEditDur('+i+',this.value)" style="font-size:.75rem;border:1px solid var(--sage-light);border-radius:3px;padding:.2rem .3rem;background:var(--sage-pale);color:var(--sage-dark);">'+opts+'</select>' +
-      '<button onclick="removeEditSession('+i+')" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem;padding:0 .2rem;">✕</button>' +
-    '</div>';
-  }).join('') || '<p style="padding:.8rem;font-size:.82rem;color:var(--grey-mid);text-align:center;">No sessions yet — click + Add Session</p>';
-}
-
-function setEditDur(i, mins) {
-  editSessions[i].customMins = parseInt(mins);
-  editSessions[i].end = new Date(editSessions[i].start.getTime() + parseInt(mins)*60000);
-  recalcEditTotal();
-}
-
-function addEditSession() {
-  const last = editSessions[editSessions.length-1];
-  const start = last ? new Date(last.start.getTime() + 7*24*3600000) : new Date();
-  editSessions.push({ title: 'Literacy Session', start, end: new Date(start.getTime()+3600000), customMins: 60 });
-  renderEditSessions();
-  recalcEditTotal();
-}
-
-function removeEditSession(i) {
-  editSessions.splice(i, 1);
-  renderEditSessions();
-  recalcEditTotal();
-}
-
-function recalcEditTotal() {
-  const rate = parseFloat(document.getElementById('edit-rate').value) || 0;
-  let totalMins = 0;
-  editSessions.forEach(s => {
-    const mins = s.customMins || Math.round(((s.end-s.start)/60000)/15)*15 || 60;
-    totalMins += mins;
-  });
-  const total = (totalMins/60) * rate;
-  document.getElementById('edit-amount').value = total.toFixed(2);
-}
-
-function closeEditModal() {
-  document.getElementById('edit-modal').style.display = 'none';
-  editSessions = [];
-}
-
-function saveEditModal() {
-  const i = parseInt(document.getElementById('edit-modal-idx').value);
-  invoiceHistory[i].id         = document.getElementById('edit-inv-id').value.trim();
-  invoiceHistory[i].client     = document.getElementById('edit-client').value.trim();
-  invoiceHistory[i].period     = document.getElementById('edit-period').value.trim();
-  invoiceHistory[i].amount     = parseFloat(document.getElementById('edit-amount').value) || 0;
-  invoiceHistory[i].hourlyRate = parseFloat(document.getElementById('edit-rate').value) || 0;
-  invoiceHistory[i].sessions   = editSessions.map(s => ({
-    title:      s.title,
-    start:      s.start?.toISOString(),
-    end:        s.end?.toISOString(),
-    customMins: s.customMins
-  }));
-  safeStoreHistory();
-  renderHistory();
-  closeEditModal();
-}
+// Edit modal helpers removed — editing now opens in invoice screen
 
 // ── EMAIL FROM HISTORY ──
 function emailFromHistory(i) {
