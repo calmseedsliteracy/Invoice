@@ -200,6 +200,7 @@ body{background:var(--grey-pale);font-family:'DM Sans',sans-serif;color:var(--in
   #invoice-screen{display:block!important;}
   .dur-select{display:none!important;}
   .dur-print{display:inline!important;}
+  #paid-stamp{display:none!important;}
 }
 </style>
 </head>
@@ -367,6 +368,7 @@ Account number: 03-1395-0108028-003</textarea></div>
     <button class="btn-sm" onclick="addManualRow()">+ Add Session</button>
     <button class="btn-sm teal" onclick="emailInvoice()">✉ Email Invoice</button>
     <button class="btn-sm" onclick="saveToHistory()">💾 Save</button>
+    <button class="btn-sm" id="paid-btn" onclick="markAsPaid()" style="background:#2e7d32;border-color:#2e7d32;">✓ Mark as Paid</button>
     <button class="btn-sm sage" onclick="window.print()">🖨 Print / PDF</button>
   </div>
 
@@ -829,6 +831,58 @@ function addManualRow() {
   const now = new Date();
   sessions.push({title:'Literacy Session', start:now, end:new Date(now.getTime()+3600000)});
   renderTable();
+}
+
+// ── MARK AS PAID ──
+function markAsPaid() {
+  const sel = document.getElementById('inv-status-select');
+  sel.value = 'paid';
+  updateStatusStyle();
+
+  // Add a PAID stamp to the invoice visually
+  let stamp = document.getElementById('paid-stamp');
+  if (!stamp) {
+    stamp = document.createElement('div');
+    stamp.id = 'paid-stamp';
+    stamp.textContent = 'PAID';
+    stamp.style.cssText = 'position:absolute;top:3.5rem;right:3.5rem;font-family:"Lora",serif;font-size:2.8rem;font-weight:700;color:rgba(46,125,50,0.18);border:4px solid rgba(46,125,50,0.18);padding:.2rem 1rem;border-radius:4px;letter-spacing:.2em;transform:rotate(-15deg);pointer-events:none;z-index:10;';
+    const doc = document.getElementById('invoice-doc');
+    doc.style.position = 'relative';
+    doc.appendChild(stamp);
+  }
+  stamp.style.display = 'block';
+
+  // Auto-save to history with paid status
+  if (currentInvoiceData) {
+    currentInvoiceData.status = 'paid';
+    const record = {
+      id:       currentInvoiceData.id,
+      client:   currentInvoiceData.client,
+      period:   currentInvoiceData.period,
+      amount:   currentInvoiceData.amount || 0,
+      status:   'paid',
+      savedAt:  new Date().toISOString(),
+      sessions: sessions.map(s => ({
+        title: s.title || 'Literacy Session',
+        start: s.start?.toISOString(),
+        end:   s.end?.toISOString(),
+        customMins: s.customMins || null
+      })),
+      hourlyRate:    hourlyRate,
+      discountType:  currentInvoiceData.discountType  || 'none',
+      discountVal:   currentInvoiceData.discountVal   || 0,
+      discountLabel: currentInvoiceData.discountLabel || ''
+    };
+    const uniqueKey = record.id + '|' + record.client;
+    const idx = invoiceHistory.findIndex(h => (h.id+'|'+h.client) === uniqueKey);
+    if (idx >= 0) invoiceHistory[idx] = record;
+    else invoiceHistory.unshift(record);
+    safeStoreHistory();
+  }
+
+  const btn = document.getElementById('paid-btn');
+  btn.textContent = '✓ Paid!';
+  setTimeout(() => btn.textContent = '✓ Mark as Paid', 2000);
 }
 
 // ── STATUS ──
