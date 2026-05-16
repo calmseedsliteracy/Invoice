@@ -413,11 +413,15 @@ Account number: 03-1395-0108028-003</textarea></div>
 
 <!-- ══ HISTORY SCREEN ══ -->
 <div id="history-screen" class="screen">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;flex-wrap:wrap;gap:.5rem;">
     <h2>Invoice History</h2>
-    <button onclick="clearAllHistory()" style="font-family:'DM Mono',monospace;font-size:.68rem;padding:.35rem .8rem;border-radius:4px;border:1px solid #e57373;background:white;color:#c62828;cursor:pointer;">🗑 Clear All</button>
+    <div style="display:flex;gap:.5rem;">
+      <button onclick="backupHistory()" style="font-family:'DM Mono',monospace;font-size:.68rem;padding:.35rem .8rem;border-radius:4px;border:1px solid var(--sage-light);background:var(--sage-pale);color:var(--sage-dark);cursor:pointer;">⬇ Backup</button>
+      <label style="font-family:'DM Mono',monospace;font-size:.68rem;padding:.35rem .8rem;border-radius:4px;border:1px solid var(--sage-light);background:var(--sage-pale);color:var(--sage-dark);cursor:pointer;">⬆ Restore<input type="file" id="restore-file" accept=".json" onchange="restoreHistory(this)" style="display:none;"></label>
+      <button onclick="clearAllHistory()" style="font-family:'DM Mono',monospace;font-size:.68rem;padding:.35rem .8rem;border-radius:4px;border:1px solid #e57373;background:white;color:#c62828;cursor:pointer;">🗑 Clear All</button>
+    </div>
   </div>
-  <p class="subtitle">All saved invoices. Click a status to update it.</p>
+  <p class="subtitle">All saved invoices. Click a status to update it. Use <strong>Backup</strong> to save a copy to your computer.</p>
   <div class="earnings-bar" id="earnings-bar"></div>
   <table class="history-table" id="history-table">
     <thead>
@@ -466,7 +470,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('inv-date').value = today;
   const due = new Date(now); due.setDate(due.getDate() + 14);
   document.getElementById('due-date').value = due.toISOString().split('T')[0];
-  document.getElementById('inv-number').value = 'INV-' + String(now.getMonth()+1).padStart(2,'0') + now.getFullYear().toString().slice(-2);
+  // Invoice number is set when Generate is clicked, so client name is available
   renderClientChips();
   renderHistory();
   handleOAuthRedirect();
@@ -669,6 +673,17 @@ function generateInvoice() {
 
   // Store invoice metadata for saving
   const monthName = new Date(year, month, 1).toLocaleDateString('en-NZ', {month:'long', year:'numeric'});
+  // Auto-generate invoice number using client initials + month + year
+  const clientNameForId = document.getElementById('client-name').value || '';
+  const initials = clientNameForId.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0,3);
+  const now2 = new Date();
+  const autoInvNum = (initials || 'INV') + '-' + String(now2.getMonth()+1).padStart(2,'0') + now2.getFullYear().toString().slice(-2);
+  const existingNum = document.getElementById('inv-number').value;
+  // Only auto-set if blank or if it's still a generic number (no initials)
+  if (!existingNum || /^INV-\d{4}$/.test(existingNum)) {
+    document.getElementById('inv-number').value = autoInvNum;
+  }
+
   const discountType  = document.getElementById('discount-type').value;
   const discountVal   = parseFloat(document.getElementById('client-discount').value) || 0;
   const discountLabel = document.getElementById('discount-label').value || 'Multi-lesson discount';
@@ -915,6 +930,46 @@ function clearAllHistory() {
   invoiceHistory = [];
   localStorage.removeItem('csl_history');
   renderHistory();
+}
+
+function backupHistory() {
+  if (invoiceHistory.length === 0) { alert('No invoices to back up yet.'); return; }
+  const data = JSON.stringify(invoiceHistory, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'csl-invoice-history-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function restoreHistory(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      if (!Array.isArray(parsed)) throw new Error('Invalid format');
+      // Merge with existing — don't overwrite, add any missing ones
+      let added = 0;
+      parsed.forEach(record => {
+        if (!record.id && !record.client) return;
+        const uniqueKey = record.id + '|' + record.client;
+        const exists = invoiceHistory.find(h => (h.id+'|'+h.client) === uniqueKey);
+        if (!exists) { invoiceHistory.push(record); added++; }
+      });
+      safeStoreHistory();
+      renderHistory();
+      alert('Restored! ' + added + ' invoice(s) added to history.');
+    } catch(err) {
+      alert('Could not read backup file. Please make sure it is a valid backup.');
+    }
+  };
+  reader.readAsText(file);
+  // Reset input so same file can be selected again
+  input.value = '';
 }
 
 function safeStoreHistory() {
