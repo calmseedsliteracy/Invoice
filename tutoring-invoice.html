@@ -842,14 +842,26 @@ function updateStatusStyle() {
 function saveToHistory() {
   if (!currentInvoiceData) return;
 
-  // Only store lightweight summary — never sessions or large data
+  // Store summary + lightweight session list
+  const sessionSnapshot = sessions.map(s => ({
+    title: s.title || 'Literacy Session',
+    start: s.start?.toISOString(),
+    end:   s.end?.toISOString(),
+    customMins: s.customMins || null
+  }));
+
   const record = {
-    id:      currentInvoiceData.id,
-    client:  currentInvoiceData.client,
-    period:  currentInvoiceData.period,
-    amount:  currentInvoiceData.amount || 0,
-    status:  document.getElementById('inv-status-select').value,
-    savedAt: new Date().toISOString()
+    id:       currentInvoiceData.id,
+    client:   currentInvoiceData.client,
+    period:   currentInvoiceData.period,
+    amount:   currentInvoiceData.amount || 0,
+    status:   document.getElementById('inv-status-select').value,
+    savedAt:  new Date().toISOString(),
+    sessions: sessionSnapshot,
+    hourlyRate: hourlyRate,
+    discountType:  currentInvoiceData.discountType || 'none',
+    discountVal:   currentInvoiceData.discountVal  || 0,
+    discountLabel: currentInvoiceData.discountLabel || ''
   };
 
   // Use invoice number + client as the unique key to avoid overwriting different clients' invoices
@@ -905,6 +917,8 @@ function renderHistory() {
       <td>NZD $${(h.amount||0).toFixed(2)}</td>
       <td><select class="hist-status ${h.status}" onchange="updateHistStatus(${i},this)">${statusOpts}</select></td>
       <td><div class="hist-actions">
+        <button class="hist-btn" onclick="editHistory(${i})">✏ Edit</button>
+        <button class="hist-btn" onclick="emailFromHistory(${i})">✉ Email</button>
         <button class="hist-btn danger" onclick="deleteHistory(${i})">Delete</button>
       </div></td>
     </tr>`;
@@ -1161,6 +1175,170 @@ function disconnectGCal() {
   document.getElementById('gcal-error').style.display = 'none';
 }
 
+// ── EDIT FROM HISTORY ──
+let editSessions = []; // working copy of sessions being edited
+
+function editHistory(i) {
+  const h = invoiceHistory[i];
+  if (!h) return;
+  document.getElementById('edit-modal-idx').value = i;
+  document.getElementById('edit-inv-id').value  = h.id || '';
+  document.getElementById('edit-client').value  = h.client || '';
+  document.getElementById('edit-period').value  = h.period || '';
+  document.getElementById('edit-rate').value    = h.hourlyRate || hourlyRate || 0;
+
+  // Load sessions from saved record, or create a single placeholder
+  editSessions = (h.sessions || []).map(s => ({
+    title:      s.title || 'Literacy Session',
+    start:      s.start ? new Date(s.start) : new Date(),
+    end:        s.end   ? new Date(s.end)   : new Date(Date.now() + 3600000),
+    customMins: s.customMins || null
+  }));
+
+  if (editSessions.length === 0) {
+    editSessions.push({ title: 'Literacy Session', start: new Date(), end: new Date(Date.now()+3600000), customMins: null });
+  }
+
+  renderEditSessions();
+  recalcEditTotal();
+  document.getElementById('edit-modal').style.display = 'flex';
+}
+
+function renderEditSessions() {
+  const list = document.getElementById('edit-sessions-list');
+  const durOpts = [30,45,50,60,75,90,120];
+  list.innerHTML = editSessions.map((s, i) => {
+    const mins = s.customMins || Math.round(((s.end - s.start)/60000)/15)*15 || 60;
+    const opts = durOpts.map(m => {
+      const h2 = Math.floor(m/60), r = m%60;
+      const lbl = h2 > 0 ? (r > 0 ? h2+'h '+r+'m' : h2+'h') : r+'m';
+      return '<option value="'+m+'"'+(mins===m?' selected':'')+'>'+lbl+'</option>';
+    }).join('');
+    const d = s.start ? s.start.toLocaleDateString('en-NZ',{day:'numeric',month:'short'}) : '—';
+    return '<div style="display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;border-bottom:1px solid var(--rule);">' +
+      '<span style="font-family:'DM Mono',monospace;font-size:.72rem;color:var(--grey-mid);min-width:55px;">'+d+'</span>' +
+      '<input value="'+s.title+'" oninput="editSessions['+i+'].title=this.value" style="flex:1;border:none;border-bottom:1px solid var(--rule);font-size:.85rem;padding:.2rem .3rem;outline:none;">' +
+      '<select onchange="setEditDur('+i+',this.value)" style="font-size:.75rem;border:1px solid var(--sage-light);border-radius:3px;padding:.2rem .3rem;background:var(--sage-pale);color:var(--sage-dark);">'+opts+'</select>' +
+      '<button onclick="removeEditSession('+i+')" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem;padding:0 .2rem;">✕</button>' +
+    '</div>';
+  }).join('') || '<p style="padding:.8rem;font-size:.82rem;color:var(--grey-mid);text-align:center;">No sessions yet — click + Add Session</p>';
+}
+
+function setEditDur(i, mins) {
+  editSessions[i].customMins = parseInt(mins);
+  editSessions[i].end = new Date(editSessions[i].start.getTime() + parseInt(mins)*60000);
+  recalcEditTotal();
+}
+
+function addEditSession() {
+  const last = editSessions[editSessions.length-1];
+  const start = last ? new Date(last.start.getTime() + 7*24*3600000) : new Date();
+  editSessions.push({ title: 'Literacy Session', start, end: new Date(start.getTime()+3600000), customMins: 60 });
+  renderEditSessions();
+  recalcEditTotal();
+}
+
+function removeEditSession(i) {
+  editSessions.splice(i, 1);
+  renderEditSessions();
+  recalcEditTotal();
+}
+
+function recalcEditTotal() {
+  const rate = parseFloat(document.getElementById('edit-rate').value) || 0;
+  let totalMins = 0;
+  editSessions.forEach(s => {
+    const mins = s.customMins || Math.round(((s.end-s.start)/60000)/15)*15 || 60;
+    totalMins += mins;
+  });
+  const total = (totalMins/60) * rate;
+  document.getElementById('edit-amount').value = total.toFixed(2);
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').style.display = 'none';
+  editSessions = [];
+}
+
+function saveEditModal() {
+  const i = parseInt(document.getElementById('edit-modal-idx').value);
+  invoiceHistory[i].id         = document.getElementById('edit-inv-id').value.trim();
+  invoiceHistory[i].client     = document.getElementById('edit-client').value.trim();
+  invoiceHistory[i].period     = document.getElementById('edit-period').value.trim();
+  invoiceHistory[i].amount     = parseFloat(document.getElementById('edit-amount').value) || 0;
+  invoiceHistory[i].hourlyRate = parseFloat(document.getElementById('edit-rate').value) || 0;
+  invoiceHistory[i].sessions   = editSessions.map(s => ({
+    title:      s.title,
+    start:      s.start?.toISOString(),
+    end:        s.end?.toISOString(),
+    customMins: s.customMins
+  }));
+  safeStoreHistory();
+  renderHistory();
+  closeEditModal();
+}
+
+// ── EMAIL FROM HISTORY ──
+function emailFromHistory(i) {
+  const h = invoiceHistory[i];
+  if (!h) return;
+
+  // Try to find client email from saved profiles
+  const clientProfile = clients.find(c => c.name === h.client);
+  const clientEmail = clientProfile?.email || '';
+
+  const subject = h.id + ' – Calm Seeds Literacy';
+  const statusMsg = {
+    draft:   '',
+    sent:    'I'm following up on the invoice I sent recently.',
+    overdue: 'I'm following up as this invoice is now overdue.',
+    paid:    'Thank you for your payment!'
+  }[h.status] || '';
+
+  const body = `Kia ora ${h.client},
+
+${statusMsg ? statusMsg + '
+
+' : ''}` +
+    `Invoice: ${h.id}
+` +
+    `Period: ${h.period}
+` +
+    `Total: NZD $${(h.amount||0).toFixed(2)}
+
+` +
+    `Payment details:
+Account name: S Diprose
+Account number: 03-1395-0108028-003
+
+` +
+    `Please don't hesitate to get in touch if you have any questions.
+
+` +
+    `Ngā mihi,
+Calm Seeds Literacy
+calmseedsliteracy@gmail.com
+02102579164`;
+
+  document.getElementById('modal-to').value = clientEmail;
+  document.getElementById('modal-subject').value = subject;
+  document.getElementById('modal-body').value = body;
+
+  const modal = document.getElementById('email-modal');
+  modal.style.display = 'flex';
+}
+
+function closeEmailModal() {
+  document.getElementById('email-modal').style.display = 'none';
+}
+
+function sendEmailFromModal() {
+  const to      = document.getElementById('modal-to').value;
+  const subject = encodeURIComponent(document.getElementById('modal-subject').value);
+  const body    = encodeURIComponent(document.getElementById('modal-body').value);
+  window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+}
+
 // ── EMAIL INVOICE ──
 function emailInvoice() {
   const clientEmail = document.getElementById('client-email').value || '';
@@ -1194,5 +1372,72 @@ calmseedsliteracy@gmail.com
   window.location.href = `mailto:${clientEmail}?subject=${subject}&body=${body}`;
 }
 </script>
+
+<!-- Edit invoice modal -->
+<div id="edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:8px;padding:2rem;max-width:580px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
+      <h3 style="font-family:'Lora',serif;font-size:1.1rem;">✏ Edit Invoice</h3>
+      <button onclick="closeEditModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--grey-mid);">✕</button>
+    </div>
+    <input type="hidden" id="edit-modal-idx">
+    <div class="field" style="margin-bottom:.8rem;">
+      <label>Invoice Number</label>
+      <input type="text" id="edit-inv-id" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;">
+    </div>
+    <div class="field" style="margin-bottom:.8rem;">
+      <label>Client Name</label>
+      <input type="text" id="edit-client" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;">
+    </div>
+    <div class="field" style="margin-bottom:.8rem;">
+      <label>Period</label>
+      <input type="text" id="edit-period" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;">
+    </div>
+    <div class="field" style="margin-bottom:.8rem;">
+      <label>Hourly Rate (NZD $)</label>
+      <input type="number" id="edit-rate" min="0" step="0.50" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;" oninput="recalcEditTotal()">
+    </div>
+    <div style="margin-bottom:.8rem;">
+      <label style="font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--grey-mid);display:block;margin-bottom:.4rem;">Sessions</label>
+      <div id="edit-sessions-list" style="max-height:220px;overflow-y:auto;border:1px solid var(--grey-light);border-radius:4px;"></div>
+      <button onclick="addEditSession()" style="margin-top:.5rem;font-family:'DM Mono',monospace;font-size:.7rem;padding:.35rem .8rem;border:1px dashed var(--sage-light);background:var(--sage-pale);color:var(--sage-dark);border-radius:4px;cursor:pointer;width:100%;">+ Add Session</button>
+    </div>
+    <div class="field" style="margin-bottom:1.2rem;">
+      <label>Total Amount (NZD $) <span style="font-weight:300;font-size:.75rem;">— auto-calculated</span></label>
+      <input type="number" id="edit-amount" min="0" step="0.01" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;background:#f9f9f9;" readonly>
+    </div>
+    <div style="display:flex;gap:.8rem;justify-content:flex-end;">
+      <button onclick="closeEditModal()" style="font-family:'DM Mono',monospace;font-size:.75rem;padding:.55rem 1.1rem;border:1px solid var(--grey-light);background:white;border-radius:4px;cursor:pointer;">Cancel</button>
+      <button onclick="saveEditModal()" style="font-family:'DM Mono',monospace;font-size:.75rem;padding:.55rem 1.2rem;background:var(--sage-dark);color:white;border:none;border-radius:4px;cursor:pointer;">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Email draft modal -->
+<div id="email-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:8px;padding:2rem;max-width:600px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
+      <h3 style="font-family:'Lora',serif;font-size:1.1rem;">✉ Draft Email</h3>
+      <button onclick="closeEmailModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--grey-mid);">✕</button>
+    </div>
+    <div class="field" style="margin-bottom:.8rem;">
+      <label>To</label>
+      <input type="email" id="modal-to" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;">
+    </div>
+    <div class="field" style="margin-bottom:.8rem;">
+      <label>Subject</label>
+      <input type="text" id="modal-subject" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;">
+    </div>
+    <div class="field" style="margin-bottom:1.2rem;">
+      <label>Message</label>
+      <textarea id="modal-body" rows="12" style="width:100%;padding:.6rem .8rem;border:1px solid var(--grey-light);border-radius:4px;font-family:'DM Sans',sans-serif;font-size:.88rem;resize:vertical;line-height:1.6;"></textarea>
+    </div>
+    <div style="display:flex;gap:.8rem;justify-content:flex-end;">
+      <button onclick="closeEmailModal()" style="font-family:'DM Mono',monospace;font-size:.75rem;padding:.55rem 1.1rem;border:1px solid var(--grey-light);background:white;border-radius:4px;cursor:pointer;">Cancel</button>
+      <button onclick="sendEmailFromModal()" style="font-family:'DM Mono',monospace;font-size:.75rem;padding:.55rem 1.2rem;background:var(--sage-dark);color:white;border:none;border-radius:4px;cursor:pointer;">Open in Mail App →</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
