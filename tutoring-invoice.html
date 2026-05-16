@@ -201,6 +201,9 @@ body{background:var(--grey-pale);font-family:'DM Sans',sans-serif;color:var(--in
   .dur-select{display:none!important;}
   .dur-print{display:inline!important;}
   #paid-stamp{display:none!important;}
+  .sessions-table th:last-child,
+  .sessions-table td:last-child{display:none!important;}
+  #paid-summary{display:none!important;}
 }
 </style>
 </head>
@@ -393,7 +396,7 @@ Account number: 03-1395-0108028-003</textarea></div>
         <div class="inv-meta-item"><label>Due Date</label><p id="d-due-date"></p></div>
       </div>
       <table class="sessions-table">
-        <thead><tr><th></th><th>Date</th><th>Session</th><th>Duration</th><th>Rate</th><th>Amount</th></tr></thead>
+        <thead><tr><th></th><th>Date</th><th>Session</th><th>Duration</th><th>Rate</th><th>Amount</th><th>Paid</th></tr></thead>
         <tbody id="sessions-tbody"></tbody>
       </table>
       <div class="inv-totals">
@@ -741,15 +744,56 @@ function renderTable() {
       const selected = (s.customMins != null ? s.customMins : dur.totalMins) === m ? 'selected' : '';
       return '<option value="'+m+'" '+selected+'>'+label+'</option>';
     }).join('');
-    return '<tr>' +
+    const isPaid = s.paid || false;
+    const rowStyle = isPaid ? 'opacity:0.5;' : '';
+    const paidBtn = isPaid
+      ? '<button onclick="toggleSessionPaid('+i+')" style="font-family:monospace;font-size:.7rem;padding:.2rem .5rem;border-radius:3px;border:1px solid #c8e6c9;background:#e8f5e9;color:#2e7d32;cursor:pointer;">✓ Paid</button>'
+      : '<button onclick="toggleSessionPaid('+i+')" style="font-family:monospace;font-size:.7rem;padding:.2rem .5rem;border-radius:3px;border:1px solid var(--grey-light);background:white;color:var(--grey-mid);cursor:pointer;">Unpaid</button>';
+    return '<tr style="'+rowStyle+'">' +
       '<td><button class="remove-row" onclick="removeSession('+i+')" title="Remove">✕</button></td>' +
       '<td><span class="session-date">'+fmtDate(s.start)+'</span></td>' +
       '<td><span contenteditable="true">'+(s.title||'Literacy Session')+'</span></td>' +
       '<td><select class="dur-select" onchange="setDuration('+i+',this.value)" style="font-family:monospace;font-size:.78rem;color:var(--sage-dark);border:1px solid var(--sage-light);border-radius:4px;padding:.2rem .4rem;background:var(--sage-pale);cursor:pointer;">'+opts+'</select><span class="dur-print">'+dur.display+'</span></td>' +
       '<td style="color:var(--grey-mid)">NZD $'+hourlyRate.toFixed(2)+'/hr</td>' +
-      '<td>NZD $'+amount.toFixed(2)+'</td></tr>';
+      '<td>NZD $'+amount.toFixed(2)+'</td>' +
+      '<td>'+paidBtn+'</td></tr>';
   }).join('');
   recalcTotals();
+}
+
+function toggleSessionPaid(i) {
+  sessions[i].paid = !sessions[i].paid;
+  // Check if all sessions paid — auto-mark invoice as paid
+  const allPaid = sessions.length > 0 && sessions.every(s => s.paid);
+  if (allPaid) {
+    document.getElementById('inv-status-select').value = 'paid';
+    updateStatusStyle();
+  } else if (sessions.some(s => s.paid)) {
+    document.getElementById('inv-status-select').value = 'sent';
+    updateStatusStyle();
+  }
+  renderTable();
+  // Update paid summary
+  updatePaidSummary();
+}
+
+function updatePaidSummary() {
+  const paidCount  = sessions.filter(s => s.paid).length;
+  const unpaidCount = sessions.length - paidCount;
+  let el = document.getElementById('paid-summary');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'paid-summary';
+    el.style.cssText = 'font-family:monospace;font-size:.72rem;padding:.5rem .9rem;background:var(--sage-pale);border-radius:4px;margin-bottom:1rem;color:var(--grey-mid);display:flex;gap:1.5rem;';
+    const table = document.querySelector('.sessions-table');
+    table.parentNode.insertBefore(el, table);
+  }
+  if (paidCount === 0 && unpaidCount === 0) { el.style.display='none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML =
+    '<span>✓ <strong style="color:#2e7d32">'+paidCount+' paid</strong></span>' +
+    '<span>◷ <strong style="color:#c62828">'+unpaidCount+' unpaid</strong></span>' +
+    '<span style="margin-left:auto;">NZD $'+sessions.filter(s=>s.paid).reduce((sum,s)=>{const d=duration(s.start,s.end,s.customMins);return sum+d.decimal*hourlyRate;},0).toFixed(2)+' received</span>';
 }
 
 function setDuration(i, mins) {
@@ -901,7 +945,8 @@ function saveToHistory() {
     title: s.title || 'Literacy Session',
     start: s.start?.toISOString(),
     end:   s.end?.toISOString(),
-    customMins: s.customMins || null
+    customMins: s.customMins || null,
+    paid: s.paid || false
   }));
 
   const record = {
@@ -1241,7 +1286,8 @@ function editHistory(i) {
     title:      s.title || 'Literacy Session',
     start:      s.start ? new Date(s.start) : new Date(),
     end:        s.end   ? new Date(s.end)   : new Date(Date.now() + 3600000),
-    customMins: s.customMins || null
+    customMins: s.customMins || null,
+    paid:       s.paid || false
   }));
 
   if (sessions.length === 0) {
