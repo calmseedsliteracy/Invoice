@@ -1290,35 +1290,19 @@ function emailFromHistory(i) {
   const subject = h.id + ' – Calm Seeds Literacy';
   const statusMsg = {
     draft:   '',
-    sent:    'I'm following up on the invoice I sent recently.',
-    overdue: 'I'm following up as this invoice is now overdue.',
+    sent:    'I\'m following up on the invoice I sent recently.',
+    overdue: 'I\'m following up as this invoice is now overdue.',
     paid:    'Thank you for your payment!'
   }[h.status] || '';
 
-  const body = `Kia ora ${h.client},
-
-${statusMsg ? statusMsg + '
-
-' : ''}` +
-    `Invoice: ${h.id}
-` +
-    `Period: ${h.period}
-` +
-    `Total: NZD $${(h.amount||0).toFixed(2)}
-
-` +
-    `Payment details:
-Account name: S Diprose
-Account number: 03-1395-0108028-003
-
-` +
-    `Please don't hesitate to get in touch if you have any questions.
-
-` +
-    `Ngā mihi,
-Calm Seeds Literacy
-calmseedsliteracy@gmail.com
-02102579164`;
+  const body = 'Kia ora ' + h.client + ',\n\n' +
+    (statusMsg ? statusMsg + '\n\n' : '') +
+    'Invoice: ' + h.id + '\n' +
+    'Period: ' + h.period + '\n' +
+    'Total: NZD $' + (h.amount||0).toFixed(2) + '\n\n' +
+    'Payment details:\nAccount name: S Diprose\nAccount number: 03-1395-0108028-003\n\n' +
+    'Please don\'t hesitate to get in touch if you have any questions.\n\n' +
+    'Ng\u0101 mihi,\nCalm Seeds Literacy\ncalmseedsliteracy@gmail.com\n02102579164';
 
   document.getElementById('modal-to').value = clientEmail;
   document.getElementById('modal-subject').value = subject;
