@@ -326,7 +326,13 @@ Account number: 03-1395-0108028-003</textarea></div>
       </div>
     </div>
 
-    <div style="margin-top:1.2rem;" class="filter-row">
+    <div style="margin-top:1rem;display:flex;gap:.6rem;align-items:center;margin-bottom:.8rem;">
+      <button onclick="setFilterMode('month')" id="mode-month-btn" class="gcal-btn" style="font-size:.72rem;padding:.4rem .9rem;">Single Month</button>
+      <button onclick="setFilterMode('range')" id="mode-range-btn" class="gcal-btn secondary" style="font-size:.72rem;padding:.4rem .9rem;">Date Range</button>
+    </div>
+
+    <!-- Single month mode -->
+    <div id="filter-month-mode" class="filter-row" style="margin-bottom:.6rem;">
       <div class="field"><label>Month</label>
         <select id="filter-month">
           <option value="0">January</option><option value="1">February</option><option value="2">March</option>
@@ -337,6 +343,13 @@ Account number: 03-1395-0108028-003</textarea></div>
       </div>
       <div class="field"><label>Year</label><input type="number" id="filter-year" value="2026" min="2000" max="2100"></div>
       <div class="field"><label>Keyword Filter (optional)</label><input type="text" id="keyword-filter" placeholder="tutor, reading, literacy…"></div>
+    </div>
+
+    <!-- Date range mode -->
+    <div id="filter-range-mode" style="display:none;margin-bottom:.6rem;" class="filter-row">
+      <div class="field"><label>From Date</label><input type="date" id="filter-date-from"></div>
+      <div class="field"><label>To Date</label><input type="date" id="filter-date-to"></div>
+      <div class="field"><label>Keyword Filter (optional)</label><input type="text" id="keyword-filter-range" placeholder="tutor, reading, literacy…"></div>
     </div>
     <p class="keyword-hint">Leave keyword blank to include all events, or filter by word in the event title.</p>
   </div>
@@ -668,16 +681,42 @@ function generateInvoice() {
   const year    = parseInt(document.getElementById('filter-year').value);
   const keyword = document.getElementById('keyword-filter').value.toLowerCase().trim();
 
-  sessions = parsedEvents.filter(ev => {
-    const parts = ev.start.toLocaleDateString('en-NZ', {year:'numeric',month:'numeric',day:'numeric'}).split('/');
-    const lm = parseInt(parts[1]) - 1, ly = parseInt(parts[2]);
-    if (ly !== year || lm !== month) return false;
-    if (keyword && !ev.title?.toLowerCase().includes(keyword)) return false;
-    return true;
-  }).sort((a,b) => a.start - b.start);
+  const filterMode = document.getElementById('filter-range-mode').style.display === 'none' ? 'month' : 'range';
+
+  if (filterMode === 'month') {
+    sessions = parsedEvents.filter(ev => {
+      const parts = ev.start.toLocaleDateString('en-NZ', {year:'numeric',month:'numeric',day:'numeric'}).split('/');
+      const lm = parseInt(parts[1]) - 1, ly = parseInt(parts[2]);
+      if (ly !== year || lm !== month) return false;
+      if (keyword && !ev.title?.toLowerCase().includes(keyword)) return false;
+      return true;
+    }).sort((a,b) => a.start - b.start);
+  } else {
+    const fromVal = document.getElementById('filter-date-from').value;
+    const toVal   = document.getElementById('filter-date-to').value;
+    const kw      = document.getElementById('keyword-filter-range').value.toLowerCase().trim();
+    if (!fromVal || !toVal) { alert('Please select both a From and To date.'); return; }
+    const fromDate = new Date(fromVal + 'T00:00:00');
+    const toDate   = new Date(toVal   + 'T23:59:59');
+    sessions = parsedEvents.filter(ev => {
+      if (ev.start < fromDate || ev.start > toDate) return false;
+      if (kw && !ev.title?.toLowerCase().includes(kw)) return false;
+      return true;
+    }).sort((a,b) => a.start - b.start);
+  }
 
   // Store invoice metadata for saving
-  const monthName = new Date(year, month, 1).toLocaleDateString('en-NZ', {month:'long', year:'numeric'});
+  let monthName;
+  const filterModeCheck = document.getElementById('filter-range-mode').style.display === 'none' ? 'month' : 'range';
+  if (filterModeCheck === 'month') {
+    monthName = new Date(year, month, 1).toLocaleDateString('en-NZ', {month:'long', year:'numeric'});
+  } else {
+    const fv = document.getElementById('filter-date-from').value;
+    const tv = document.getElementById('filter-date-to').value;
+    const fd = new Date(fv).toLocaleDateString('en-NZ', {day:'numeric', month:'short', year:'numeric'});
+    const td = new Date(tv).toLocaleDateString('en-NZ', {day:'numeric', month:'short', year:'numeric'});
+    monthName = fd + ' – ' + td;
+  }
   // Auto-generate invoice number using client initials + month + year
   const clientNameForId = document.getElementById('client-name').value || '';
   const initials = clientNameForId.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0,3);
@@ -872,9 +911,23 @@ function duration(start, end, customMins) {
 function removeSession(i) { sessions.splice(i,1); renderTable(); }
 
 function addManualRow() {
-  const now = new Date();
-  sessions.push({title:'Literacy Session', start:now, end:new Date(now.getTime()+3600000)});
+  const dateStr = prompt('Enter session date (DD/MM/YYYY):', formatDateForPrompt(new Date()));
+  if (!dateStr) return;
+  const parts = dateStr.split('/');
+  if (parts.length !== 3) { alert('Please use DD/MM/YYYY format'); return; }
+  const d = parseInt(parts[0]), m = parseInt(parts[1])-1, y = parseInt(parts[2]);
+  if (isNaN(d) || isNaN(m) || isNaN(y)) { alert('Invalid date'); return; }
+  const start = new Date(y, m, d, 13, 0, 0);
+  const end   = new Date(y, m, d, 14, 0, 0);
+  sessions.push({ title:'Literacy Session', start, end, customMins: 60, paid: false });
+  sessions.sort((a, b) => a.start - b.start);
   renderTable();
+}
+
+function formatDateForPrompt(d) {
+  return String(d.getDate()).padStart(2,'0') + '/' +
+         String(d.getMonth()+1).padStart(2,'0') + '/' +
+         d.getFullYear();
 }
 
 // ── MARK AS PAID ──
@@ -1113,6 +1166,30 @@ function safeStoreHistory() {
 const GCAL_CLIENT_ID = ''; // filled by user via prompt on first connect
 let gcalToken = null;
 let gcalCalendars = [];
+
+function setFilterMode(mode) {
+  const monthMode = document.getElementById('filter-month-mode');
+  const rangeMode = document.getElementById('filter-range-mode');
+  const monthBtn  = document.getElementById('mode-month-btn');
+  const rangeBtn  = document.getElementById('mode-range-btn');
+  if (mode === 'month') {
+    monthMode.style.display = 'flex';
+    rangeMode.style.display = 'none';
+    monthBtn.style.background = 'var(--sage-dark)';
+    rangeBtn.style.background = 'var(--grey-dark)';
+  } else {
+    monthMode.style.display = 'none';
+    rangeMode.style.display = 'flex';
+    rangeBtn.style.background = 'var(--sage-dark)';
+    monthBtn.style.background = 'var(--grey-dark)';
+    // Default from/to to current month
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const to   = new Date(now.getFullYear(), now.getMonth()+1, 0);
+    document.getElementById('filter-date-from').value = from.toISOString().split('T')[0];
+    document.getElementById('filter-date-to').value   = to.toISOString().split('T')[0];
+  }
+}
 
 function initGCal() {
   // Restore saved client ID into the input field
