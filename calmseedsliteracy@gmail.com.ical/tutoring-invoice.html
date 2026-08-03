@@ -367,6 +367,16 @@ Account number: 03-1395-0108028-003</textarea></div>
     <div class="field-row full">
       <div class="field"><label>Notes</label><textarea id="inv-notes" placeholder="Thank you for supporting your child's literacy journey. Please transfer by the due date."></textarea></div>
     </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Credit to Apply (NZD $)<br><small style="font-weight:300;font-size:.75rem;">From previous overpayment — leave blank if none</small></label>
+        <input type="number" id="inv-credit" placeholder="e.g. 350" min="0" step="0.01">
+      </div>
+      <div class="field">
+        <label>Credit Label<br><small style="font-weight:300;font-size:.75rem;">How it appears on the invoice</small></label>
+        <input type="text" id="credit-label" placeholder="Credit from previous invoice">
+      </div>
+    </div>
   </div>
 
   <button class="btn-primary" onclick="generateInvoice()">Generate Invoice →</button>
@@ -420,6 +430,8 @@ Account number: 03-1395-0108028-003</textarea></div>
           <div class="totals-row"><label>Sessions</label><span id="d-total-sessions">0</span></div>
           <div class="totals-row" id="d-paid-row" style="display:none;"><label id="d-paid-label">Already Paid</label><span id="d-paid-amount" style="color:#2e7d32;">-NZD $0.00</span></div>
           <div class="totals-row" id="d-discount-row" style="display:none;"><label id="d-discount-label">Discount</label><span id="d-discount-amount" style="color:#2e7d32;">-NZD $0.00</span></div>
+          <div class="totals-row" id="d-credit-row" style="display:none;"><label id="d-credit-label">Credit Applied</label><span id="d-credit-amount" style="color:#2e7d32;">-NZD $0.00</span></div>
+          <div class="totals-row" id="d-carryover-row" style="display:none;"><label id="d-carryover-label" style="color:#1565c0;">Credit to Carry Forward</label><span id="d-carryover-amount" style="color:#1565c0;">NZD $0.00</span></div>
           <div class="totals-row"><label>TOTAL DUE</label><span id="d-total-amount">NZD $0.00</span></div>
         </div>
       </div>
@@ -751,6 +763,8 @@ function generateInvoice() {
   const discountType  = document.getElementById('discount-type').value;
   const discountVal   = parseFloat(document.getElementById('client-discount').value) || 0;
   const discountLabel = document.getElementById('discount-label').value || 'Multi-lesson discount';
+  const creditVal     = parseFloat(document.getElementById('inv-credit').value) || 0;
+  const creditLabel   = document.getElementById('credit-label').value || 'Credit from previous invoice';
   currentInvoiceData = {
     id: document.getElementById('inv-number').value || 'INV-???',
     client: document.getElementById('client-name').value || 'Client',
@@ -758,7 +772,9 @@ function generateInvoice() {
     status: 'draft',
     discountType,
     discountVal,
-    discountLabel
+    discountLabel,
+    creditVal,
+    creditLabel
   };
 
   document.getElementById('inv-status-select').value = 'draft';
@@ -877,7 +893,7 @@ function updatePaidSummary() {
   el.innerHTML =
     '<span>✓ <strong style="color:#2e7d32">'+paidCount+' paid</strong></span>' +
     '<span>◷ <strong style="color:#c62828">'+unpaidCount+' unpaid</strong></span>' +
-    '<span style="margin-left:auto;">NZD $'+sessions.filter(s=>s.paid).reduce((sum,s)=>{const d=duration(s.start,s.end,s.customMins);return sum+d.decimal*hourlyRate;},0).toFixed(2)+' received</span>';
+    '<span style="margin-left:auto;">NZD $'+sessions.filter(s=>s.paid).reduce((sum,s)=>{const d=duration(s.start,s.end,s.customMins);const r=(s.customRate!=null)?s.customRate:hourlyRate;return sum+d.decimal*r;},0).toFixed(2)+' received</span>';
 }
 
 function setDuration(i, mins) {
@@ -888,7 +904,8 @@ function setDuration(i, mins) {
   const rows = document.getElementById('sessions-tbody').querySelectorAll('tr');
   if (rows[i]) {
     const dur = duration(sessions[i].start, sessions[i].end, sessions[i].customMins);
-    const amount = dur.decimal * hourlyRate;
+    const sessionRate = (sessions[i].customRate != null) ? sessions[i].customRate : hourlyRate;
+    const amount = dur.decimal * sessionRate;
     rows[i].cells[5].textContent = 'NZD $' + amount.toFixed(2);
     const printSpan = rows[i].querySelector('.dur-print');
     if (printSpan) printSpan.textContent = dur.display;
@@ -963,18 +980,46 @@ function updateTotals(totalMins, totalAmount, paidAmt) {
 
   // Ensure discount never makes total negative
   discountAmt = Math.min(discountAmt, totalAmount);
-  const finalAmount = Math.max(0, totalAmount - discountAmt);
+  const afterDiscount = Math.max(0, totalAmount - discountAmt);
 
   if (discountAmt > 0) {
     discountRow.style.display = 'flex';
     document.getElementById('d-discount-label').textContent  = labelText;
     document.getElementById('d-discount-amount').textContent = '-NZD $' + discountAmt.toFixed(2);
-    if (currentInvoiceData) currentInvoiceData.amount = finalAmount;
   } else {
     discountRow.style.display = 'none';
-    if (currentInvoiceData) currentInvoiceData.amount = totalAmount;
   }
 
+  // Apply credit
+  const creditVal   = currentInvoiceData?.creditVal || 0;
+  const creditLabel = currentInvoiceData?.creditLabel || 'Credit from previous invoice';
+  const creditRow   = document.getElementById('d-credit-row');
+  const carryRow    = document.getElementById('d-carryover-row');
+
+  let finalAmount = afterDiscount;
+  let carryForward = 0;
+
+  if (creditVal > 0) {
+    const creditApplied = Math.min(creditVal, afterDiscount);
+    carryForward = Math.max(0, creditVal - afterDiscount);
+    finalAmount = Math.max(0, afterDiscount - creditVal);
+
+    creditRow.style.display = 'flex';
+    document.getElementById('d-credit-label').textContent  = creditLabel;
+    document.getElementById('d-credit-amount').textContent = '-NZD $' + creditApplied.toFixed(2);
+
+    if (carryForward > 0) {
+      carryRow.style.display = 'flex';
+      document.getElementById('d-carryover-amount').textContent = 'NZD $' + carryForward.toFixed(2);
+    } else {
+      carryRow.style.display = 'none';
+    }
+  } else {
+    creditRow.style.display = 'none';
+    carryRow.style.display  = 'none';
+  }
+
+  if (currentInvoiceData) currentInvoiceData.amount = finalAmount;
   document.getElementById('d-total-amount').textContent = 'NZD $' + finalAmount.toFixed(2);
 }
 
@@ -1093,6 +1138,8 @@ function saveToHistory() {
     status:   document.getElementById('inv-status-select').value,
     savedAt:  new Date().toISOString(),
     dueDate:  document.getElementById('due-date').value || '',
+    creditVal:   currentInvoiceData.creditVal   || 0,
+    creditLabel: currentInvoiceData.creditLabel || '',
     sessions: sessionSnapshot,
     hourlyRate: hourlyRate,
     discountType:  currentInvoiceData.discountType || 'none',
@@ -1522,6 +1569,8 @@ function editHistory(i) {
   document.getElementById('discount-type').value   = h.discountType || 'none';
   document.getElementById('client-discount').value = h.discountVal || '';
   document.getElementById('discount-label').value  = h.discountLabel || '';
+  document.getElementById('inv-credit').value      = h.creditVal || '';
+  document.getElementById('credit-label').value    = h.creditLabel || '';
   toggleDiscountInput();
 
   // Set invoice status
