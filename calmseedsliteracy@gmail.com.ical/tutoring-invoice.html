@@ -1549,7 +1549,7 @@ function editHistory(i) {
   // Restore rates and discount
   hourlyRate = h.hourlyRate || hourlyRate || 0;
 
-  // Restore currentInvoiceData
+  // Restore currentInvoiceData — must include ALL fields used in updateTotals
   currentInvoiceData = {
     id:           h.id,
     client:       h.client,
@@ -1558,6 +1558,8 @@ function editHistory(i) {
     discountType:  h.discountType  || 'none',
     discountVal:   h.discountVal   || 0,
     discountLabel: h.discountLabel || '',
+    creditVal:     h.creditVal     || 0,
+    creditLabel:   h.creditLabel   || 'Credit from previous invoice',
     amount:        h.amount || 0
   };
 
