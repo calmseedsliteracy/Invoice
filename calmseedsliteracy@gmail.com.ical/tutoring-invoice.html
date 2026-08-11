@@ -191,11 +191,12 @@ body{background:var(--grey-pale);font-family:'DM Sans',sans-serif;color:var(--in
 .earnings-card .count{font-size:.78rem;color:var(--grey-mid);}
 
 @media print{
-  body{background:white;}
-  .app-nav,.invoice-controls{display:none;}
-  .invoice-wrap{margin:0;padding:0;max-width:100%;}
-  .invoice-doc{box-shadow:none;border:none;}
-  .remove-row{display:none;}
+  @page{margin:1cm;}
+  body{background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .app-nav,.invoice-controls{display:none!important;}
+  .invoice-wrap{margin:0!important;padding:0!important;max-width:100%!important;}
+  .invoice-doc{box-shadow:none!important;border:none!important;padding:1.5rem!important;}
+  .remove-row{display:none!important;}
   .screen{display:none!important;}
   #invoice-screen{display:block!important;}
   .dur-select{display:none!important;}
@@ -206,6 +207,22 @@ body{background:var(--grey-pale);font-family:'DM Sans',sans-serif;color:var(--in
   #paid-summary{display:none!important;}
   .sessions-table td:nth-child(5) input{display:none!important;}
   .rate-print{display:inline!important;}
+  .inv-top-stripe{margin:-1.5rem -1.5rem 1.5rem -1.5rem!important;}
+  .inv-header{margin-bottom:1.2rem!important;padding-bottom:1rem!important;}
+  .inv-header-left img{height:60px!important;}
+  .inv-title{font-size:1.6rem!important;}
+  .inv-meta{margin-bottom:1.2rem!important;padding:0.8rem 1rem!important;}
+  .sessions-table{font-size:.78rem!important;}
+  .sessions-table thead th{padding:.4rem .6rem!important;}
+  .sessions-table tbody td{padding:.45rem .6rem!important;}
+  .inv-totals{margin-bottom:1.2rem!important;}
+  .totals-box{width:220px!important;}
+  .totals-row{padding:.4rem .7rem!important;font-size:.8rem!important;}
+  .totals-row:last-child{padding:.6rem .7rem!important;font-size:.9rem!important;}
+  .inv-footer{padding-top:1rem!important;}
+  .inv-footer-section p{font-size:.78rem!important;}
+  .inv-bottom-tag{margin-top:1rem!important;padding-top:.8rem!important;}
+  .gold-line{margin-bottom:1.2rem!important;}
 }
 </style>
 </head>
