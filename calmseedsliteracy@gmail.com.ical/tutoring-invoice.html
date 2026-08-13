@@ -394,6 +394,16 @@ Account number: 03-1395-0108028-003</textarea></div>
         <input type="text" id="credit-label" placeholder="Credit from previous invoice">
       </div>
     </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Outstanding Balance (NZD $)<br><small style="font-weight:300;font-size:.75rem;">Auto-filled from history — edit if needed</small></label>
+        <input type="number" id="inv-outstanding" placeholder="0.00" min="0" step="0.01">
+      </div>
+      <div class="field">
+        <label>Outstanding Label<br><small style="font-weight:300;font-size:.75rem;">How it appears on the invoice</small></label>
+        <input type="text" id="outstanding-label" placeholder="Outstanding balance from previous invoice">
+      </div>
+    </div>
   </div>
 
   <button class="btn-primary" onclick="generateInvoice()">Generate Invoice →</button>
@@ -445,6 +455,7 @@ Account number: 03-1395-0108028-003</textarea></div>
         <div class="totals-box">
           <div class="totals-row"><label>Total Hours</label><span id="d-total-hours">0h 0m</span></div>
           <div class="totals-row"><label>Sessions</label><span id="d-total-sessions">0</span></div>
+          <div class="totals-row" id="d-outstanding-row" style="display:none;"><label id="d-outstanding-label" style="color:#c62828;">Outstanding Balance</label><span id="d-outstanding-amount" style="color:#c62828;">+NZD $0.00</span></div>
           <div class="totals-row" id="d-paid-row" style="display:none;"><label id="d-paid-label">Already Paid</label><span id="d-paid-amount" style="color:#2e7d32;">-NZD $0.00</span></div>
           <div class="totals-row" id="d-discount-row" style="display:none;"><label id="d-discount-label">Discount</label><span id="d-discount-amount" style="color:#2e7d32;">-NZD $0.00</span></div>
           <div class="totals-row" id="d-credit-row" style="display:none;"><label id="d-credit-label">Credit Applied</label><span id="d-credit-amount" style="color:#2e7d32;">-NZD $0.00</span></div>
@@ -611,6 +622,22 @@ function loadClient(i) {
   document.getElementById('client-discount').value = c.discount || '';
   document.getElementById('discount-label').value = c.discountLabel || '';
   toggleDiscountInput();
+  document.getElementById('inv-number').value = '';
+
+  // Auto-fill outstanding balance from most recent unpaid/overdue invoice for this client
+  const clientHistory = invoiceHistory
+    .filter(h => h.client === c.name && (h.status === 'sent' || h.status === 'overdue' || h.status === 'draft'))
+    .sort((a, b) => new Date(b.savedAt||0) - new Date(a.savedAt||0));
+
+  if (clientHistory.length > 0 && (clientHistory[0].amount || 0) > 0) {
+    const latest = clientHistory[0];
+    document.getElementById('inv-outstanding').value = (latest.amount || 0).toFixed(2);
+    document.getElementById('outstanding-label').value =
+      'Outstanding balance from ' + (latest.period || latest.id || 'previous invoice');
+  } else {
+    document.getElementById('inv-outstanding').value = '';
+    document.getElementById('outstanding-label').value = '';
+  }
 }
 
 function deleteClient(i) {
@@ -782,6 +809,8 @@ function generateInvoice() {
   const discountLabel = document.getElementById('discount-label').value || 'Multi-lesson discount';
   const creditVal     = parseFloat(document.getElementById('inv-credit').value) || 0;
   const creditLabel   = document.getElementById('credit-label').value || 'Credit from previous invoice';
+  const outstandingVal   = parseFloat(document.getElementById('inv-outstanding').value) || 0;
+  const outstandingLabel = document.getElementById('outstanding-label').value || 'Outstanding balance from previous invoice';
   currentInvoiceData = {
     id: document.getElementById('inv-number').value || 'INV-???',
     client: document.getElementById('client-name').value || 'Client',
@@ -791,7 +820,9 @@ function generateInvoice() {
     discountVal,
     discountLabel,
     creditVal,
-    creditLabel
+    creditLabel,
+    outstandingVal,
+    outstandingLabel
   };
 
   document.getElementById('inv-status-select').value = 'draft';
@@ -972,6 +1003,19 @@ function updateTotals(totalMins, totalAmount, paidAmt) {
     document.getElementById('d-paid-amount').textContent = '-NZD $' + paidAmt.toFixed(2);
   } else {
     paidRow.style.display = 'none';
+  }
+
+  // Add outstanding balance to total
+  const outstandingVal   = currentInvoiceData?.outstandingVal || 0;
+  const outstandingLabel = currentInvoiceData?.outstandingLabel || 'Outstanding balance from previous invoice';
+  const outstandingRow   = document.getElementById('d-outstanding-row');
+  if (outstandingVal > 0) {
+    totalAmount += outstandingVal;
+    outstandingRow.style.display = 'flex';
+    document.getElementById('d-outstanding-label').textContent  = outstandingLabel;
+    document.getElementById('d-outstanding-amount').textContent = '+NZD $' + outstandingVal.toFixed(2);
+  } else {
+    outstandingRow.style.display = 'none';
   }
 
   const discountType  = currentInvoiceData?.discountType || 'none';
@@ -1155,8 +1199,10 @@ function saveToHistory() {
     status:   document.getElementById('inv-status-select').value,
     savedAt:  new Date().toISOString(),
     dueDate:  document.getElementById('due-date').value || '',
-    creditVal:   currentInvoiceData.creditVal   || 0,
-    creditLabel: currentInvoiceData.creditLabel || '',
+    creditVal:      currentInvoiceData.creditVal      || 0,
+    creditLabel:    currentInvoiceData.creditLabel    || '',
+    outstandingVal: currentInvoiceData.outstandingVal || 0,
+    outstandingLabel: currentInvoiceData.outstandingLabel || '',
     sessions: sessionSnapshot,
     hourlyRate: hourlyRate,
     discountType:  currentInvoiceData.discountType || 'none',
@@ -1568,16 +1614,18 @@ function editHistory(i) {
 
   // Restore currentInvoiceData — must include ALL fields used in updateTotals
   currentInvoiceData = {
-    id:           h.id,
-    client:       h.client,
-    period:       h.period,
-    status:       h.status || 'draft',
-    discountType:  h.discountType  || 'none',
-    discountVal:   h.discountVal   || 0,
-    discountLabel: h.discountLabel || '',
-    creditVal:     h.creditVal     || 0,
-    creditLabel:   h.creditLabel   || 'Credit from previous invoice',
-    amount:        h.amount || 0
+    id:               h.id,
+    client:           h.client,
+    period:           h.period,
+    status:           h.status || 'draft',
+    discountType:     h.discountType     || 'none',
+    discountVal:      h.discountVal      || 0,
+    discountLabel:    h.discountLabel    || '',
+    creditVal:        h.creditVal        || 0,
+    creditLabel:      h.creditLabel      || 'Credit from previous invoice',
+    outstandingVal:   h.outstandingVal   || 0,
+    outstandingLabel: h.outstandingLabel || 'Outstanding balance from previous invoice',
+    amount:           h.amount || 0
   };
 
   // Populate the setup form fields
@@ -1590,6 +1638,8 @@ function editHistory(i) {
   document.getElementById('discount-label').value  = h.discountLabel || '';
   document.getElementById('inv-credit').value      = h.creditVal || '';
   document.getElementById('credit-label').value    = h.creditLabel || '';
+  document.getElementById('inv-outstanding').value = h.outstandingVal || '';
+  document.getElementById('outstanding-label').value = h.outstandingLabel || '';
   toggleDiscountInput();
 
   // Set invoice status
