@@ -1033,16 +1033,28 @@ function updateTotals(totalMins, totalAmount, paidAmt) {
   const outstandingLabel = currentInvoiceData?.outstandingLabel || 'Outstanding balance from previous invoice';
   const outstandingRow   = document.getElementById('d-outstanding-row');
   if (outstandingVal > 0) {
-    totalAmount += outstandingVal;
-    outstandingRow.style.display = 'flex';
     const outstandingType = currentInvoiceData?.outstandingType || 'overdue';
     const isReminder = outstandingType === 'reminder';
-    // Amber for reminder, red for overdue
+
+    // Only add to total if overdue — reminders are informational only
+    if (!isReminder) totalAmount += outstandingVal;
+
+    outstandingRow.style.display = 'flex';
     const outColour = isReminder ? '#e65100' : '#c62828';
     document.getElementById('d-outstanding-label').textContent  = outstandingLabel;
     document.getElementById('d-outstanding-label').style.color  = outColour;
-    document.getElementById('d-outstanding-amount').textContent = '+NZD $' + outstandingVal.toFixed(2);
-    document.getElementById('d-outstanding-amount').style.color = outColour;
+
+    if (isReminder) {
+      // Show as a note, no + amount
+      document.getElementById('d-outstanding-amount').textContent = 'NZD $' + outstandingVal.toFixed(2);
+      document.getElementById('d-outstanding-amount').style.color = outColour;
+      document.getElementById('d-outstanding-amount').style.fontStyle = 'italic';
+      document.getElementById('d-outstanding-amount').title = 'This amount is not included in the total — for reference only';
+    } else {
+      document.getElementById('d-outstanding-amount').textContent = '+NZD $' + outstandingVal.toFixed(2);
+      document.getElementById('d-outstanding-amount').style.color = outColour;
+      document.getElementById('d-outstanding-amount').style.fontStyle = 'normal';
+    }
   } else {
     outstandingRow.style.display = 'none';
   }
